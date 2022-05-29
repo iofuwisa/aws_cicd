@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+
+Description: |
+  test-system
+Resources:
+  ApiRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub test-system-api-role
+      Description: !Sub Role for executing test-system api
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+                - s3.amazonaws.com
+                - cloudformation.amazonaws.com
+                - lambda.amazonaws.com
+                - iam.amazonaws.com
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayAdministrator
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+        - arn:aws:iam::aws:policy/IAMFullAccess
+      Policies:
+        - PolicyName: !Sub test-system-api-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/test-system-api-role
+  userinfoAPI:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src/functions/userinfo/index.js
+      FunctionName: userinfo
+      Handler: index.handler
+      Role: !GetAtt ApiRole.Arn
+      Runtime: nodejs14.x    
+  authorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./src/authorizer/index.js
+      FunctionName: authorizer
+      Handler: index.handler
+      Role: !GetAtt ApiRole.Arn
+      Runtime: nodejs14.x    
+  API:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: test-system-api
+      Description: test-system API
+      StageName: api
+      Mode: overwrite
+      EndpointConfiguration:
+        Type: EDGE
+      # MethodSettings:
+      #   - HttpMethod: "*"
+      # Domain: 
+      # Auth:
+      # Cors: 
+      #   AllowCredentials: True
+      #   AllowHeaders: "*"
+      #   AllowMethods: "*"
+      #   AllowOrigin: "*"
+      #   MaxAge: 600
+      # DefinitionBody
+      DefinitionBody:
+        Fn::Transform:
+          Name: 'AWS::Include'
+          Parameters:
+            Location: ./api-definition/api.yaml
+      # Tags:
+      #   - Key: SystemID
+      #     Value: temp-system
+
+

@@ -1,0 +1,34 @@
+openapi: '3.0.2'
+info:
+  title: test-system-api
+  version: '1.0'
+paths:
+  /userinfo:
+    get:
+      summary: User infomation
+      description: User infomation
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Success'
+      x-amazon-apigateway-integration:
+        # credentials: !GetAtt ApiRole.Arn
+        credentials: 
+          Fn::GetAtt: [ ApiRole, Arn ]
+        httpMethod: POST
+        uri:
+          Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${userinfoAPI.Arn}/invocations
+        type: aws_proxy
+components:
+  schemas:
+    Success:
+      description: OK response
+      type: object
+      properties:
+        name:
+          type: string
+      required:
+        - name

@@ -1,0 +1,169 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: |
+  This template contains CodeCommit CodeBuild CodePipeline
+Parameters:
+  SystemID:
+    Type: String
+    Description: >-
+      Name of this system.
+      Use for name of AWS resources.
+Resources:
+  Repository:
+    Type: 'AWS::CodeCommit::Repository'
+    Properties:
+      RepositoryName: !Sub ${SystemID}-repo
+      RepositoryDescription: !Sub Repository for ${SystemID}
+      Tags:
+        - Key: SystemID
+          Value: !Ref SystemID
+  ArtifactStore:
+    Type: AWS::S3::Bucket
+    Properties: 
+      BucketName: !Sub ${SystemID}-building-artifacts
+      Tags:
+        - Key: SystemID
+          Value: !Ref SystemID
+  PipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${SystemID}-pipeline-role
+      Description: !Sub Role for executing pipeline of ${SystemID}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+                - codepipeline.amazonaws.com
+                - codebuild.amazonaws.com
+                - s3.amazonaws.com
+                - cloudformation.amazonaws.com
+                - lambda.amazonaws.com
+                - iam.amazonaws.com
+                - apigateway.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/AWSCodeCommitFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/CloudWatchFullAccess
+        - arn:aws:iam::aws:policy/AWSCodeBuildAdminAccess
+        - arn:aws:iam::aws:policy/AWSCloudFormationFullAccess
+        - arn:aws:iam::aws:policy/AmazonAPIGatewayAdministrator
+        - arn:aws:iam::aws:policy/AWSLambda_FullAccess
+        - arn:aws:iam::aws:policy/IAMFullAccess
+      Policies:
+        - PolicyName: !Sub ${SystemID}-policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: iam:PassRole
+                Resource: !Sub arn:aws:iam::${AWS::AccountId}:role/${SystemID}-pipeline-role
+      Tags:
+        - Key: SystemID
+          Value: !Ref SystemID
+  Build:
+   Type: "AWS::CodeBuild::Project"
+   Properties:
+    Name: !Sub ${SystemID}-build
+    ServiceRole: !GetAtt PipelineRole.Arn
+    Source:
+      Type: CODECOMMIT
+      BuildSpec: buildspec-app.yaml
+      Location: !GetAtt Repository.CloneUrlHttp
+    Artifacts:
+      Type: S3
+      Location: !Sub ${SystemID}-building-artifacts
+    Environment: 
+      Type: LINUX_CONTAINER
+      ComputeType: BUILD_GENERAL1_SMALL
+      Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+      EnvironmentVariables:
+        - Name: ARTIFACT_STORE
+          Type: PLAINTEXT
+          Value: !Sub ${SystemID}-building-artifacts
+    Tags:
+      - Key: SystemID
+        Value: !Ref SystemID
+
+  Pipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    Properties:
+      Name: !Sub ${SystemID}-pipeline
+      RoleArn: !GetAtt PipelineRole.Arn
+      ArtifactStores:
+        - ArtifactStore:
+            Type: S3
+            Location: !Sub ${SystemID}-building-artifacts
+          Region: !Ref AWS::Region
+
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: CodeCommit
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeCommit
+                Version: 1
+              Configuration:
+                RepositoryName: !GetAtt Repository.Name
+                BranchName: main
+                PollForSourceChanges: true
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Sub ${SystemID}-build
+                # PrimarySource:
+                # EnvironmentVariables:
+              InputArtifacts: 
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+        - Name: Deploy
+          Actions:
+            - Name: CreateChangeSet
+              RunOrder: 1
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: CHANGE_SET_REPLACE
+                StackName: !Ref SystemID
+                ChangeSetName: !Sub ${SystemID}-changeset
+                RoleArn: !GetAtt PipelineRole.Arn
+                TemplatePath: BuildArtifact::packaged-template-app.yaml
+                Capabilities: CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+              InputArtifacts: 
+                - Name: BuildArtifact
+            - Name: ExecuteChangeSet
+              RunOrder: 2
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: CloudFormation
+                Version: 1
+              Configuration:
+                ActionMode: CHANGE_SET_EXECUTE
+                StackName: !Ref SystemID
+                ChangeSetName: !Sub ${SystemID}-changeset
+                Capabilities: CAPABILITY_IAM,CAPABILITY_NAMED_IAM,CAPABILITY_AUTO_EXPAND
+      Tags:
+        - Key: SystemID
+          Value: !Ref SystemID
+        
+        
+        
+
+       
